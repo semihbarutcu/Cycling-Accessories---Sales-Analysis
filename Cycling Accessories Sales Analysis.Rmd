@@ -1,0 +1,312 @@
+---
+title: "Cycling Accessories - Sales Analysis"
+author: "Semih Barutcu"
+date: "6/1/2020"
+output:
+  pdf_document: default
+  word_document: default
+---
+## Introduction
+
+In this project, I used 4 tables to analyze a medium size bikes & cycling accessories organisation which are generated for KPMG Virtual Internship. This tables are consisting of last year sales (transactions), customer demogrophics (cdemographics), customer address information (caddress) and potential new customers (newcustomer). I wrote the names of datasets in parantheses as I saved.
+
+I used tidyverse package family to analyze the data.
+```{r message=F}
+library(pacman)
+p_load(tidyverse, lubridate, skimr, summarytools, autoEDA, visdat, C50)
+```
+
+
+```{r}
+transactions <- read.csv("Transactions.csv", header = T, skip = 1)
+
+cdemographics <- read.csv("CustomerDemographic.csv", header = T, skip = 1)
+
+caddress <- read.csv("CustomerAddress.csv", header = T, skip = 1)
+
+newcustomer <- read.csv("NewCustomerList.csv", header = T, skip = 1)
+```
+
+
+I arranged dates using lubridate package function mdy() to be able to use date features for my analyses. 
+```{r, warning=F}
+transactions$transaction_date <- mdy(transactions$transaction_date)
+cdemographics$DOB <- mdy(cdemographics$DOB)
+newcustomer$DOB <- mdy(newcustomer$DOB)
+```
+
+chr(character) variables to factor is applied using lapply() fuction after I listed these columns. Categorical data is much more useful to explore the data. I also removed "$" sign from standard_cost variable to be able to get proper statistics as numeric values.
+
+```{r}
+cols1 <- c("order_status", "brand", "product_line", "product_class", "product_size", "standard_cost")
+transactions[cols1] <- lapply(transactions[cols1], factor)
+
+cols2 <- c("gender","job_title", "job_industry_category", "wealth_segment", "deceased_indicator", "owns_car")
+cdemographics[cols2] <- lapply(cdemographics[cols2], factor)
+
+cols3 <- c("address", "postcode","state", "country")
+caddress[cols3] <- lapply(caddress[cols3], factor)
+
+cols4 <- c("gender","job_title", "job_industry_category", "wealth_segment", "deceased_indicator", "owns_car","address", "postcode","state", "country")
+newcustomer[cols4] <- lapply(newcustomer[cols4], factor)
+
+# Nested gsub() function. First remove $ sign and after remove commas if exists
+transactions$standard_cost <- as.numeric(gsub(",", "",gsub("\\$", "", transactions$standard_cost)))
+```
+
+\newpage
+## First Look, Handling Incorrect Data and Feature Engineering
+
+All summary statistics are listed below. 
+
+All transactions were happened in 2017. 360 of the total 20000 transactions are missing online_order information. 179 of the orders were cancelled. 197 of the transactions are without a brand, product_line, product_class, product_size, standard_cost and product_first_sold_date. 
+
+3 of 4000 total observations are misidentified as F, Femal and M. There are 88 observations with gender U and 87 of observations do not have tenure information. 88 of customers do not have date of birth information. Job title is missing for 506 persons and job industry category is missing for 656.
+
+New South Wales and Victoria states used with both full names and abbrevations. All 3999 address records are from Australia. 3 addresses are used for 2 times.
+
+```{r}
+summary(transactions)
+summary(cdemographics)
+summary(caddress)
+summary(newcustomer)
+```
+
+
+
+I checked addresses below which exists 2 times in the data. They have different postcodes and customer IDs.
+
+```{r}
+caddress %>% filter(address == "3 Mariners Cove Terrace")
+caddress %>% filter(address == "3 Talisman Place")
+caddress %>% filter(address == "64 Macpherson Junction")
+```
+
+Gender and state variables corrections have been made below. I used factor function to get corrected categories.
+
+```{r}
+cdemographics$gender[cdemographics$gender == "Femal" | cdemographics$gender == "F"] <- "Female"
+
+cdemographics$gender[cdemographics$gender == "M"] <- "Male"
+
+cdemographics$gender <- factor(cdemographics$gender)
+
+caddress$state[caddress$state == "New South Wales"] <- "NSW"
+
+caddress$state[caddress$state == "Victoria"] <- "VIC"
+
+caddress$state <- factor(caddress$state)
+
+summary(cdemographics$gender)
+summary(caddress$state)
+```
+
+
+Age variable is added to cdemographics and newcustomer datasets.
+```{r}
+cdemographics$age <- 2020 - year(cdemographics$DOB)
+newcustomer$age <- 2020 - year(newcustomer$DOB)
+```
+
+Summaries of new age columns can be seen below.
+```{r}
+summary(cdemographics$age)
+summary(newcustomer$age)
+```
+
+
+\newpage
+## Exploratory Data Analysis (EDA)
+
+I started to investigate datasets with using automatic Exploratory Data Analysis tools.
+
+### dfsummary
+
+```{r}
+cdemographics %>% dfSummary() %>% view()
+
+```
+
+### autoEDA
+
+I arranged the code below as eval = F because it produces a graph for every column of datasets and make it the report hard to read. I use it as a prior investigation. Graphs, which make sense to me, are going to be plotted after auto EDA part.
+
+0th product have the most transactions record and its range shows a different trend than remainings. It has biggest price range between all the products.
+
+```{r eval=F}
+autoEDA(cdemographics)
+autoEDA(cdemographics, y = "wealth_segment")
+
+autoEDA(caddress)
+autoEDA(transactions)
+autoEDA(newcustomer)
+```
+
+### visdat
+
+We can see that age(relatedly DOB) and tenure are missing for some customers. They are somewhat correlated also, we can see this from correlation plot. X columns which are nameless columns on newcustomer table are strongly correlated each other but we don't know about what they are measuring and also we don't have a similar past data about these features.
+```{r}
+vis_dat(cdemographics)
+cdemographics %>% select_if(is.numeric) %>% vis_cor()
+
+vis_dat(caddress)
+caddress %>% select_if(is.numeric) %>% vis_cor()
+
+vis_dat(transactions)
+transactions %>% select_if(is.numeric) %>% vis_cor()
+
+vis_dat(newcustomer)
+newcustomer %>% select_if(is.numeric) %>% vis_cor()
+```
+
+### Selected Graphs and Tables
+
+This graphic shows date of birth of customers accordingly their sexes. Customers are grouped by their wealth segments. Spreads look normally distributed. 
+```{r}
+cdemographics %>% 
+  filter(!is.na(DOB)) %>% 
+  ggplot(aes(year(DOB), fill=gender)) + 
+  geom_histogram(bins=20) + 
+  facet_wrap(~wealth_segment)
+```
+
+
+I observed that 88 customers gender is marked as U while they do not have a determined date of birth(DOB). Also, only one of them have tenure information. 
+
+```{r}
+cdemographics %>% 
+  filter(is.na(DOB) | is.na(tenure)) %>% 
+  group_by(wealth_segment) %>% 
+  summarize(total = n(), 
+            proportion = total / 88)
+
+```
+
+
+We can see that different brands are obtained for the 0th product and their prices are varied. Product_id variable is not consistent results to analyse.
+```{r}
+transactions %>% 
+  group_by(product_id, brand) %>% 
+  summarise(total = n(), avg=mean(list_price), min=min(list_price), max=max(list_price)) %>% 
+  arrange(product_id) %>%
+  head()
+```
+
+Profit variable has been added to Transactions table. Profit is calculated by difference between list_price and standard_cost.
+```{r}
+transactions <- transactions %>% mutate(profit = list_price - standard_cost)
+
+transactions %>% filter(!is.na(profit)) %>% ggplot(aes(product_class, profit)) + 
+  geom_boxplot() +
+  facet_wrap(~online_order)
+
+transactions %>% filter(!is.na(profit)) %>% ggplot(aes(product_size, profit)) + 
+  geom_boxplot() +
+  facet_wrap(~online_order)
+
+```
+
+
+Joining transactions and cdemographics table made possible to observe wealth_segment spread. 
+
+```{r}
+transactions %>% 
+  summarize(total_active_customers = n_distinct(customer_id)
+            )
+
+transactions %>% filter(!is.na(profit)) %>% 
+  group_by(customer_id) %>% 
+  summarise(total_order= n(), 
+            total_profit=sum(profit), 
+            avg_profit = sum(profit) / n()) %>%
+  arrange(desc(total_order)) %>%
+  head()
+
+# wealth segment statistics
+transactions %>% 
+  left_join(cdemographics, by="customer_id") %>%
+  filter(!is.na(profit)) %>%
+  filter(!is.na(wealth_segment)) %>%
+  group_by(wealth_segment) %>% 
+  summarise(total_customer = n_distinct(customer_id), 
+            total_order= n(), 
+            order_per_customer = n() / n_distinct(customer_id),
+            total_profit = sum(profit),
+            avg_profit = sum(profit)/n()
+            )
+
+
+
+transactions %>% filter(!is.na(profit)) %>% 
+  left_join(cdemographics, by="customer_id") %>%
+  filter(!is.na(wealth_segment)) %>%
+  ggplot(aes(profit, color = product_class)) +
+  geom_histogram() +
+  facet_wrap(~ wealth_segment)
+
+```
+
+
+
+```{r}
+transactions_grouped <- transactions %>% 
+  group_by(customer_id) %>% 
+  summarise(total_order= n(), 
+            total_profit = sum(profit),
+            avg_profit = sum(profit)/n()
+            )
+transactions_grouped %>% group_by(total_order) %>% summarise(n = n())
+```
+
+
+\newpage
+## Modeling
+
+New customers should be categorized subject to given customer demographics data and related datasets. We can join tables to add new features to explore on cdemographics dataset. Firstly, I am going to focus decision tree models.
+
+### Preparing the data
+
+I left-joined cdemographics and caddress tables and selected all columns that we can make predictions. I started to learn the data with sampling. 3126 of 3908 observation are attended as train and remainings are test.
+
+```{r}
+# Join all the tables to be able to reach more features
+training_set <- cdemographics %>% 
+  left_join(caddress, by="customer_id") %>%
+  left_join(transactions_grouped, by="customer_id") %>%
+  # job_title and job_industry_category
+  select(total_profit, total_order, wealth_segment, gender, past_3_years_bike_related_purchases, 
+          owns_car, tenure, age, property_valuation) %>%
+  drop_na()
+
+training_set %>% ggplot(aes(total_profit, fill=gender)) + geom_histogram(bins=15) + facet_wrap(~wealth_segment) 
+
+#set.seed(123)
+train_sample <- sample(nrow(training_set), round(nrow(training_set)*0.8))
+
+
+train <- training_set[train_sample, ]
+test  <- training_set[-train_sample, ]
+
+
+```
+
+We can see below that training and test datasets have similar proportion of wealth_segments
+
+```{r}
+prop.table(table(train$wealth_segment))
+prop.table(table(test$wealth_segment))
+```
+
+After constructing a linear model, there isn't a significant predictor for the total profit. 
+
+```{r}
+lm1 <- lm(total_profit~.,train)
+```
+
+```{r}
+summary(lm1)
+```
+
+## Conclusion
+
+After I tried a couple of machine algorithms, I believe this data was created randomly and hard to regularize with any model. While I couldn't explore any meaningful relationship between variables, this project will be a good resource for me with EDA part.
